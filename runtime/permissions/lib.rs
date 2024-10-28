@@ -3022,7 +3022,7 @@ impl<'de> Deserialize<'de> for ChildUnitPermissionArg {
     D: Deserializer<'de>,
   {
     struct ChildUnitPermissionArgVisitor;
-    impl<'de> de::Visitor<'de> for ChildUnitPermissionArgVisitor {
+    impl de::Visitor<'_> for ChildUnitPermissionArgVisitor {
       type Value = ChildUnitPermissionArg;
 
       fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
