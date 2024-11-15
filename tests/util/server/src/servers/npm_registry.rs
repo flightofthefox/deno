@@ -64,6 +64,7 @@ pub fn private_npm_registry3(port: u16) -> Vec<LocalBoxFuture<'static, ()>> {
   )
 }
 
+#[allow(elided_named_lifetimes)]
 fn run_npm_server<F, S>(
   port: u16,
   error_msg: &'static str,

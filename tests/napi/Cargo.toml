@@ -21,3 +21,6 @@ test_util.workspace = true
 
 [build-dependencies]
 napi-build = "1"
+
+[lints.clippy]
+all = "allow"

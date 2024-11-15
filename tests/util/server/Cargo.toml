@@ -65,3 +65,4 @@ prost-build.workspace = true
 
 [lints.clippy]
 all = "allow"
+elided_named_lifetimes = "allow"

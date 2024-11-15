@@ -22,3 +22,6 @@ tokio.workspace = true
 [[bench]]
 name = "utf8"
 harness = false
+
+[lints.clippy]
+all = "allow"

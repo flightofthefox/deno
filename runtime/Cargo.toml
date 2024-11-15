@@ -150,3 +150,6 @@ test_util.workspace = true
 
 [package.metadata.docs.rs]
 features = ["docsrs"]
+
+[lints.clippy]
+all = "allow"

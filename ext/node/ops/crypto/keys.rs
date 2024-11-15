@@ -327,6 +327,7 @@ const SALT_LENGTH_TAG: rsa::pkcs8::der::TagNumber =
 impl<'a> TryFrom<rsa::pkcs8::der::asn1::AnyRef<'a>> for RsaPssParameters<'a> {
   type Error = rsa::pkcs8::der::Error;
 
+  #[allow(elided_named_lifetimes)]
   fn try_from(
     any: rsa::pkcs8::der::asn1::AnyRef<'a>,
   ) -> rsa::pkcs8::der::Result<RsaPssParameters> {

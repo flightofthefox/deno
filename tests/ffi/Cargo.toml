@@ -15,3 +15,6 @@ crate-type = ["cdylib"]
 [dev-dependencies]
 pretty_assertions.workspace = true
 test_util.workspace = true
+
+[lints.clippy]
+all = "allow"
