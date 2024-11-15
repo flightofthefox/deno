@@ -26,3 +26,6 @@ deno_webidl.workspace = true
 [[bench]]
 name = "url_ops"
 harness = false
+
+[lints.clippy]
+all = "allow"

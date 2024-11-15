@@ -45,3 +45,6 @@ thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 x25519-dalek = "2.0.0"
+
+[lints.clippy]
+all = "allow"

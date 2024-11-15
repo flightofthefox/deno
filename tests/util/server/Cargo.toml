@@ -62,3 +62,6 @@ winapi = { workspace = true, features = ["consoleapi", "synchapi", "handleapi", 
 
 [build-dependencies]
 prost-build.workspace = true
+
+[lints.clippy]
+all = "allow"

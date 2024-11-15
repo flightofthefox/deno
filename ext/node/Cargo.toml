@@ -104,3 +104,6 @@ yoke.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 winapi = { workspace = true, features = ["consoleapi"] }
+
+[lints.clippy]
+all = "allow"

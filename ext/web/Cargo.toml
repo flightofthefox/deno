@@ -40,3 +40,6 @@ harness = false
 [[bench]]
 name = "timers_ops"
 harness = false
+
+[lints.clippy]
+all = "allow"

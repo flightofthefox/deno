@@ -33,3 +33,6 @@ winapi = { workspace = true, features = ["winbase", "processenv", "errhandlingap
 rand.workspace = true
 parking_lot.workspace = true
 windows-sys.workspace = true
+
+[lints.clippy]
+all = "allow"

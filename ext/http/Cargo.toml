@@ -56,3 +56,6 @@ tokio-util = { workspace = true, features = ["io"] }
 bencher.workspace = true
 http-body-util.workspace = true
 rand.workspace = true
+
+[lints.clippy]
+all = "allow"

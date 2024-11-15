@@ -30,3 +30,6 @@ rustls-tokio-stream.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+
+[lints.clippy]
+all = "allow"

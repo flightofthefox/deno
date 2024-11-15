@@ -22,3 +22,6 @@ deno_bench_util.workspace = true
 [[bench]]
 name = "dict"
 harness = false
+
+[lints.clippy]
+all = "allow"

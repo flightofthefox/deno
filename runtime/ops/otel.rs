@@ -403,6 +403,7 @@ pub fn flush() {
   }
 }
 
+#[cfg(feature = "kv")]
 pub fn handle_log(record: &log::Record) {
   use log::Level;
 

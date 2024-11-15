@@ -19,3 +19,6 @@ deno_webgpu.workspace = true
 image = { version = "0.24.7", default-features = false, features = ["png"] }
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true
+
+[lints.clippy]
+all = "allow"

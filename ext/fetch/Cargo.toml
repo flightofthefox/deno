@@ -44,3 +44,6 @@ tower-service.workspace = true
 
 [dev-dependencies]
 fast-socks5.workspace = true
+
+[lints.clippy]
+all = "allow"

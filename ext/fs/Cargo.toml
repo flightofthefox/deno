@@ -37,3 +37,6 @@ nix = { workspace = true, features = ["fs", "user"] }
 winapi = { workspace = true, features = ["winbase"] }
 windows-sys.workspace = true
 junction.workspace = true
+
+[lints.clippy]
+all = "allow"

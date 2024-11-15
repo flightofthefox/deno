@@ -24,3 +24,6 @@ serde.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 webpki-roots.workspace = true
+
+[lints.clippy]
+all = "allow"

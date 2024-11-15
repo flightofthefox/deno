@@ -53,3 +53,6 @@ features = ["dx12"]
 [target.'cfg(any(windows, all(unix, not(target_os = "emscripten"))))'.dependencies.wgpu-core]
 workspace = true
 features = ["vulkan"]
+
+[lints.clippy]
+all = "allow"
