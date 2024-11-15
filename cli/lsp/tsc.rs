@@ -34,6 +34,7 @@ use crate::util::path::relative_specifier;
 use crate::util::path::to_percent_decoded_str;
 use crate::util::result::InfallibleResultExt;
 use crate::util::v8::convert;
+use crate::worker::create_isolate_create_params;
 use deno_core::convert::Smi;
 use deno_core::convert::ToV8;
 use deno_core::error::StdAnyError;
@@ -69,6 +70,7 @@ use indexmap::IndexMap;
 use indexmap::IndexSet;
 use lazy_regex::lazy_regex;
 use log::error;
+use node_resolver::NodeModuleKind;
 use once_cell::sync::Lazy;
 use regex::Captures;
 use regex::Regex;
@@ -4401,25 +4403,15 @@ fn op_load<'s>(
       None
     } else {
       let asset_or_document = state.get_asset_or_document(&specifier);
-      asset_or_document.map(|doc| {
-        let maybe_cjs_tracker = state
-          .state_snapshot
-          .resolver
-          .maybe_cjs_tracker(Some(&specifier));
-        LoadResponse {
-          data: doc.text(),
-          script_kind: crate::tsc::as_ts_script_kind(doc.media_type()),
-          version: state.script_version(&specifier),
-          is_cjs: maybe_cjs_tracker
-            .map(|t| {
-              t.is_cjs(
-                &specifier,
-                doc.media_type(),
-                doc.maybe_parsed_source().and_then(|p| p.as_ref().ok()),
-              )
-            })
-            .unwrap_or(false),
-        }
+      asset_or_document.map(|doc| LoadResponse {
+        data: doc.text(),
+        script_kind: crate::tsc::as_ts_script_kind(doc.media_type()),
+        version: state.script_version(&specifier),
+        is_cjs: doc
+          .document()
+          .map(|d| state.state_snapshot.is_cjs_resolver.get_doc_module_kind(d))
+          .unwrap_or(NodeModuleKind::Esm)
+          == NodeModuleKind::Cjs,
       })
     };
 
@@ -4662,6 +4654,10 @@ fn op_script_names(state: &mut OpState) -> ScriptNames {
         let (types, _) = documents.resolve_dependency(
           types,
           specifier,
+          state
+            .state_snapshot
+            .is_cjs_resolver
+            .get_doc_module_kind(doc),
           doc.file_referrer(),
         )?;
         let types_doc = documents.get_or_load(&types, doc.file_referrer())?;
@@ -4765,6 +4761,7 @@ fn run_tsc_thread(
       specifier_map,
       request_rx,
     )],
+    create_params: create_isolate_create_params(),
     startup_snapshot: Some(tsc::compiler_snapshot()),
     inspector: has_inspector_server,
     ..Default::default()
@@ -5544,6 +5541,7 @@ mod tests {
       documents: Arc::new(documents),
       assets: Default::default(),
       config: Arc::new(config),
+      is_cjs_resolver: Default::default(),
       resolver,
     });
     let performance = Arc::new(Performance::default());
