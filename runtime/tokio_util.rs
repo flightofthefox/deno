@@ -56,6 +56,7 @@ pub fn create_basic_runtime() -> tokio::runtime::Runtime {
     .unwrap()
 }
 
+#[allow(unused_variables)]
 #[inline(always)]
 fn create_and_run_current_thread_inner<F, R>(
   future: F,
