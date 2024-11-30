@@ -78,6 +78,7 @@ pub fn cpu_info() -> Option<Vec<CpuInfo>> {
       std::ptr::null_mut();
     let mut msg_type: libc::mach_msg_type_number_t = 0;
     if libc::host_processor_info(
+      #[allow(deprecated)]
       libc::mach_host_self(),
       libc::PROCESSOR_CPU_LOAD_INFO,
       &mut num_cpus,
@@ -111,6 +112,7 @@ pub fn cpu_info() -> Option<Vec<CpuInfo>> {
     }
 
     libc::vm_deallocate(
+      #[allow(deprecated)]
       libc::mach_task_self(),
       info.as_ptr() as libc::vm_address_t,
       msg_type as _,

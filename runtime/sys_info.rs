@@ -282,6 +282,7 @@ pub fn mem_info() -> Option<MemInfo> {
       let mut stat = std::mem::zeroed::<libc::vm_statistics64>();
       if libc::host_statistics64(
         // TODO(@littledivy): Put this in a once_cell.
+        #[allow(deprecated)]
         libc::mach_host_self(),
         libc::HOST_VM_INFO64,
         &mut stat as *mut libc::vm_statistics64 as *mut _,

@@ -425,6 +425,7 @@ fn rss() -> usize {
   // SAFETY: libc calls
   let r = unsafe {
     libc::task_info(
+      #[allow(deprecated)]
       libc::mach_task_self(),
       libc::MACH_TASK_BASIC_INFO,
       task_info.as_mut_ptr() as libc::task_info_t,
