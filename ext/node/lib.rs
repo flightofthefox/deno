@@ -14,7 +14,9 @@ use deno_core::url::Url;
 #[allow(unused_imports)]
 use deno_core::v8;
 use deno_core::v8::ExternalReference;
+use deno_fs::FsSysTraitsAdapter;
 use node_resolver::errors::ClosestPkgJsonError;
+use node_resolver::IsBuiltInNodeModuleChecker;
 use node_resolver::NpmPackageFolderResolverRc;
 use once_cell::sync::Lazy;
 
@@ -260,6 +262,7 @@ deno_core::extension!(deno_node,
     ops::crypto::keys::op_node_derive_public_key_from_private_key,
     ops::crypto::keys::op_node_dh_keys_generate_and_export,
     ops::crypto::keys::op_node_export_private_key_der,
+    ops::crypto::keys::op_node_export_private_key_jwk,
     ops::crypto::keys::op_node_export_private_key_pem,
     ops::crypto::keys::op_node_export_public_key_der,
     ops::crypto::keys::op_node_export_public_key_pem,
@@ -364,9 +367,9 @@ deno_core::extension!(deno_node,
     ops::zlib::brotli::op_create_brotli_decompress,
     ops::zlib::brotli::op_brotli_decompress_stream,
     ops::zlib::brotli::op_brotli_decompress_stream_end,
-    ops::http::op_node_http_request<P>,
     ops::http::op_node_http_fetch_response_upgrade,
-    ops::http::op_node_http_fetch_send,
+    ops::http::op_node_http_request_with_conn<P>,
+    ops::http::op_node_http_await_response,
     ops::http2::op_http2_connect,
     ops::http2::op_http2_poll_client_connection,
     ops::http2::op_http2_client_request,
@@ -807,92 +810,28 @@ deno_core::extension!(deno_node,
   },
 );
 
-pub type NodeResolver = node_resolver::NodeResolver<DenoFsNodeResolverEnv>;
-#[allow(clippy::disallowed_types)]
-pub type NodeResolverRc =
-  deno_fs::sync::MaybeArc<node_resolver::NodeResolver<DenoFsNodeResolverEnv>>;
-pub type PackageJsonResolver =
-  node_resolver::PackageJsonResolver<DenoFsNodeResolverEnv>;
-#[allow(clippy::disallowed_types)]
-pub type PackageJsonResolverRc = deno_fs::sync::MaybeArc<
-  node_resolver::PackageJsonResolver<DenoFsNodeResolverEnv>,
->;
-
 #[derive(Debug)]
-pub struct DenoFsNodeResolverEnv {
-  fs: deno_fs::FileSystemRc,
-}
+pub struct RealIsBuiltInNodeModuleChecker;
 
-impl DenoFsNodeResolverEnv {
-  pub fn new(fs: deno_fs::FileSystemRc) -> Self {
-    Self { fs }
-  }
-}
-
-impl node_resolver::env::NodeResolverEnv for DenoFsNodeResolverEnv {
+impl IsBuiltInNodeModuleChecker for RealIsBuiltInNodeModuleChecker {
+  #[inline]
   fn is_builtin_node_module(&self, specifier: &str) -> bool {
     is_builtin_node_module(specifier)
   }
-
-  fn realpath_sync(
-    &self,
-    path: &std::path::Path,
-  ) -> std::io::Result<std::path::PathBuf> {
-    self
-      .fs
-      .realpath_sync(path)
-      .map_err(|err| err.into_io_error())
-  }
-
-  fn stat_sync(
-    &self,
-    path: &std::path::Path,
-  ) -> std::io::Result<node_resolver::env::NodeResolverFsStat> {
-    self
-      .fs
-      .stat_sync(path)
-      .map(|stat| node_resolver::env::NodeResolverFsStat {
-        is_file: stat.is_file,
-        is_dir: stat.is_directory,
-        is_symlink: stat.is_symlink,
-      })
-      .map_err(|err| err.into_io_error())
-  }
-
-  fn exists_sync(&self, path: &std::path::Path) -> bool {
-    self.fs.exists_sync(path)
-  }
-
-  fn pkg_json_fs(&self) -> &dyn deno_package_json::fs::DenoPkgJsonFs {
-    self
-  }
 }
 
-impl deno_package_json::fs::DenoPkgJsonFs for DenoFsNodeResolverEnv {
-  fn read_to_string_lossy(
-    &self,
-    path: &std::path::Path,
-  ) -> Result<Cow<'static, str>, std::io::Error> {
-    self
-      .fs
-      .read_text_file_lossy_sync(path, None)
-      .map_err(|err| err.into_io_error())
-  }
-}
-
-pub struct DenoPkgJsonFsAdapter<'a>(pub &'a dyn deno_fs::FileSystem);
-
-impl<'a> deno_package_json::fs::DenoPkgJsonFs for DenoPkgJsonFsAdapter<'a> {
-  fn read_to_string_lossy(
-    &self,
-    path: &Path,
-  ) -> Result<Cow<'static, str>, std::io::Error> {
-    self
-      .0
-      .read_text_file_lossy_sync(path, None)
-      .map_err(|err| err.into_io_error())
-  }
-}
+pub type NodeResolver = node_resolver::NodeResolver<
+  RealIsBuiltInNodeModuleChecker,
+  FsSysTraitsAdapter,
+>;
+#[allow(clippy::disallowed_types)]
+pub type NodeResolverRc = deno_fs::sync::MaybeArc<NodeResolver>;
+pub type PackageJsonResolver =
+  node_resolver::PackageJsonResolver<FsSysTraitsAdapter>;
+#[allow(clippy::disallowed_types)]
+pub type PackageJsonResolverRc = deno_fs::sync::MaybeArc<
+  node_resolver::PackageJsonResolver<FsSysTraitsAdapter>,
+>;
 
 pub fn create_host_defined_options<'s>(
   scope: &mut v8::HandleScope<'s>,

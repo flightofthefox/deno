@@ -1,6 +1,7 @@
 // Copyright 2018-2024 the Deno authors. All rights reserved. MIT license.
 
 use deno_ast::MediaType;
+use deno_cache_dir::file_fetcher::CacheSetting;
 use deno_config::workspace::WorkspaceDirectory;
 use deno_config::workspace::WorkspaceDiscoverOptions;
 use deno_core::anyhow::anyhow;
@@ -16,6 +17,7 @@ use deno_core::ModuleSpecifier;
 use deno_graph::GraphKind;
 use deno_graph::Resolution;
 use deno_path_util::url_to_file_path;
+use deno_runtime::deno_fs::FsSysTraitsAdapter;
 use deno_runtime::deno_tls::rustls::RootCertStore;
 use deno_runtime::deno_tls::RootCertStoreProvider;
 use deno_semver::jsr::JsrPackageReqReference;
@@ -95,13 +97,12 @@ use crate::args::create_default_npmrc;
 use crate::args::get_root_cert_store;
 use crate::args::has_flag_env_var;
 use crate::args::CaData;
-use crate::args::CacheSetting;
 use crate::args::CliOptions;
 use crate::args::Flags;
 use crate::args::InternalFlags;
 use crate::args::UnstableFmtOptions;
 use crate::factory::CliFactory;
-use crate::file_fetcher::FileFetcher;
+use crate::file_fetcher::CliFileFetcher;
 use crate::graph_util;
 use crate::http_util::HttpClientProvider;
 use crate::lsp::config::ConfigWatchedFileType;
@@ -270,11 +271,16 @@ impl LanguageServer {
         open_docs: &open_docs,
       };
       let graph = module_graph_creator
-        .create_graph_with_loader(GraphKind::All, roots.clone(), &mut loader)
+        .create_graph_with_loader(
+          GraphKind::All,
+          roots.clone(),
+          &mut loader,
+          graph_util::NpmCachingStrategy::Eager,
+        )
         .await?;
       graph_util::graph_valid(
         &graph,
-        factory.fs(),
+        &FsSysTraitsAdapter(factory.fs().clone()),
         &roots,
         graph_util::GraphValidOptions {
           kind: GraphKind::All,
@@ -953,15 +959,15 @@ impl Inner {
   }
 
   async fn refresh_config_tree(&mut self) {
-    let mut file_fetcher = FileFetcher::new(
+    let file_fetcher = CliFileFetcher::new(
       self.cache.global().clone(),
-      CacheSetting::RespectHeaders,
-      true,
       self.http_client_provider.clone(),
       Default::default(),
       None,
+      true,
+      CacheSetting::RespectHeaders,
+      super::logging::lsp_log_level(),
     );
-    file_fetcher.set_download_log_level(super::logging::lsp_log_level());
     let file_fetcher = Arc::new(file_fetcher);
     self
       .config
@@ -1850,20 +1856,12 @@ impl Inner {
       }
 
       let changes = if code_action_data.fix_id == "fixMissingImport" {
-        fix_ts_import_changes(
-          &code_action_data.specifier,
-          maybe_asset_or_doc
-            .as_ref()
-            .and_then(|d| d.document())
-            .map(|d| d.resolution_mode())
-            .unwrap_or(ResolutionMode::Import),
-          &combined_code_actions.changes,
-          self,
-        )
-        .map_err(|err| {
-          error!("Unable to remap changes: {:#}", err);
-          LspError::internal_error()
-        })?
+        fix_ts_import_changes(&combined_code_actions.changes, self).map_err(
+          |err| {
+            error!("Unable to remap changes: {:#}", err);
+            LspError::internal_error()
+          },
+        )?
       } else {
         combined_code_actions.changes
       };
@@ -1907,20 +1905,16 @@ impl Inner {
           asset_or_doc.scope().cloned(),
         )
         .await?;
-      if kind_suffix == ".rewrite.function.returnType" {
-        refactor_edit_info.edits = fix_ts_import_changes(
-          &action_data.specifier,
-          asset_or_doc
-            .document()
-            .map(|d| d.resolution_mode())
-            .unwrap_or(ResolutionMode::Import),
-          &refactor_edit_info.edits,
-          self,
-        )
-        .map_err(|err| {
-          error!("Unable to remap changes: {:#}", err);
-          LspError::internal_error()
-        })?
+      if kind_suffix == ".rewrite.function.returnType"
+        || kind_suffix == ".move.newFile"
+      {
+        refactor_edit_info.edits =
+          fix_ts_import_changes(&refactor_edit_info.edits, self).map_err(
+            |err| {
+              error!("Unable to remap changes: {:#}", err);
+              LspError::internal_error()
+            },
+          )?
       }
       code_action.edit = refactor_edit_info.to_workspace_edit(self)?;
       code_action
@@ -3619,11 +3613,11 @@ impl Inner {
     let workspace = match config_data {
       Some(d) => d.member_dir.clone(),
       None => Arc::new(WorkspaceDirectory::discover(
+        &FsSysTraitsAdapter::new_real(),
         deno_config::workspace::WorkspaceDiscoverStart::Paths(&[
           initial_cwd.clone()
         ]),
         &WorkspaceDiscoverOptions {
-          fs: Default::default(), // use real fs,
           deno_json_cache: None,
           pkg_json_cache: None,
           workspace_cache: None,
@@ -3671,6 +3665,7 @@ impl Inner {
         .unwrap_or_else(create_default_npmrc),
       workspace,
       force_global_cache,
+      None,
     )?;
 
     let open_docs = self.documents.documents(DocumentsFilter::OpenDiagnosable);
@@ -3787,7 +3782,7 @@ impl Inner {
         for (name, command) in scripts {
           result.push(TaskDefinition {
             name: name.clone(),
-            command: command.clone(),
+            command: Some(command.clone()),
             source_uri: url_to_uri(&package_json.specifier())
               .map_err(|_| LspError::internal_error())?,
           });

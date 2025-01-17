@@ -4,7 +4,6 @@
 #![deny(clippy::print_stdout)]
 
 pub mod analyze;
-pub mod env;
 pub mod errors;
 mod npm;
 mod package_json;
@@ -23,9 +22,11 @@ pub use package_json::PackageJsonThreadLocalCache;
 pub use path::PathClean;
 pub use resolution::parse_npm_pkg_name;
 pub use resolution::resolve_specifier_into_node_modules;
+pub use resolution::IsBuiltInNodeModuleChecker;
 pub use resolution::NodeResolution;
 pub use resolution::NodeResolutionKind;
 pub use resolution::NodeResolver;
+pub use resolution::NodeResolverRc;
 pub use resolution::ResolutionMode;
 pub use resolution::DEFAULT_CONDITIONS;
 pub use resolution::REQUIRE_CONDITIONS;

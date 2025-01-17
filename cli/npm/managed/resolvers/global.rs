@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::colors;
+use crate::npm::managed::PackageCaching;
 use crate::npm::CliNpmCache;
 use crate::npm::CliNpmTarballCache;
 use async_trait::async_trait;
@@ -17,7 +18,7 @@ use deno_npm::NpmPackageCacheFolderId;
 use deno_npm::NpmPackageId;
 use deno_npm::NpmResolutionPackage;
 use deno_npm::NpmSystemInfo;
-use deno_runtime::deno_fs::FileSystem;
+use deno_runtime::deno_fs::FsSysTraitsAdapter;
 use deno_runtime::deno_node::NodePermissions;
 use node_resolver::errors::PackageFolderResolveError;
 use node_resolver::errors::PackageNotFoundError;
@@ -46,15 +47,15 @@ pub struct GlobalNpmPackageResolver {
 impl GlobalNpmPackageResolver {
   pub fn new(
     cache: Arc<CliNpmCache>,
-    fs: Arc<dyn FileSystem>,
     tarball_cache: Arc<CliNpmTarballCache>,
     resolution: Arc<NpmResolution>,
+    sys: FsSysTraitsAdapter,
     system_info: NpmSystemInfo,
     lifecycle_scripts: LifecycleScriptsConfig,
   ) -> Self {
     Self {
       registry_read_permission_checker: RegistryReadPermissionChecker::new(
-        fs,
+        sys,
         cache.root_dir_path().to_path_buf(),
       ),
       cache,
@@ -150,10 +151,19 @@ impl NpmPackageFsResolver for GlobalNpmPackageResolver {
     )
   }
 
-  async fn cache_packages(&self) -> Result<(), AnyError> {
-    let package_partitions = self
-      .resolution
-      .all_system_packages_partitioned(&self.system_info);
+  async fn cache_packages<'a>(
+    &self,
+    caching: PackageCaching<'a>,
+  ) -> Result<(), AnyError> {
+    let package_partitions = match caching {
+      PackageCaching::All => self
+        .resolution
+        .all_system_packages_partitioned(&self.system_info),
+      PackageCaching::Only(reqs) => self
+        .resolution
+        .subset(&reqs)
+        .all_system_packages_partitioned(&self.system_info),
+    };
     cache_packages(&package_partitions.packages, &self.tarball_cache).await?;
 
     // create the copy package folders
