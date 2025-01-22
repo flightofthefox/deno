@@ -1,4 +1,13 @@
-// Copyright 2018-2024 the Deno authors. All rights reserved. MIT license.
+// Copyright 2018-2025 the Deno authors. MIT license.
+
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::ops::Deref;
+use std::ops::DerefMut;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use deno_ast::MediaType;
 use deno_config::deno_json::DenoJsonCache;
@@ -32,39 +41,31 @@ use deno_core::serde_json::json;
 use deno_core::serde_json::Value;
 use deno_core::url::Url;
 use deno_core::ModuleSpecifier;
+use deno_lib::args::has_flag_env_var;
+use deno_lib::util::hash::FastInsecureHasher;
 use deno_lint::linter::LintConfig as DenoLintConfig;
 use deno_npm::npm_rc::ResolvedNpmRc;
 use deno_package_json::PackageJsonCache;
 use deno_path_util::url_to_file_path;
-use deno_runtime::deno_fs::FsSysTraitsAdapter;
+use deno_resolver::sloppy_imports::SloppyImportsCachedFs;
 use deno_runtime::deno_node::PackageJson;
 use indexmap::IndexSet;
 use lsp_types::ClientCapabilities;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::ops::Deref;
-use std::ops::DerefMut;
-use std::path::Path;
-use std::path::PathBuf;
-use std::sync::Arc;
 use tower_lsp::lsp_types as lsp;
 
 use super::logging::lsp_log;
 use super::lsp_custom;
 use super::urls::url_to_uri;
 use crate::args::discover_npmrc_from_workspace;
-use crate::args::has_flag_env_var;
 use crate::args::CliLockfile;
 use crate::args::CliLockfileReadFromPathOptions;
 use crate::args::ConfigFile;
 use crate::args::LintFlags;
 use crate::args::LintOptions;
-use crate::cache::FastInsecureHasher;
 use crate::file_fetcher::CliFileFetcher;
 use crate::lsp::logging::lsp_warn;
 use crate::resolver::CliSloppyImportsResolver;
-use crate::resolver::SloppyImportsCachedFs;
+use crate::sys::CliSys;
 use crate::tools::lint::CliLinter;
 use crate::tools::lint::CliLinterOptions;
 use crate::tools::lint::LintRuleProvider;
@@ -852,7 +853,8 @@ impl Settings {
       Some(false)
     } else if let Some(enable_paths) = &enable_paths {
       for enable_path in enable_paths {
-        if path.starts_with(enable_path) {
+        // Also enable if the checked path is a dir containing an enabled path.
+        if path.starts_with(enable_path) || enable_path.starts_with(&path) {
           return Some(true);
         }
       }
@@ -1227,7 +1229,7 @@ impl ConfigData {
       Ok(scope_dir_path) => {
         let paths = [scope_dir_path];
         WorkspaceDirectory::discover(
-          &FsSysTraitsAdapter::new_real(),
+          &CliSys::default(),
           match specified_config {
             Some(config_path) => {
               deno_config::workspace::WorkspaceDiscoverStart::ConfigFile(
@@ -1244,7 +1246,6 @@ impl ConfigData {
             pkg_json_cache: Some(pkg_json_cache),
             workspace_cache: Some(workspace_cache),
             discover_pkg_json: !has_flag_env_var("DENO_NO_PACKAGE_JSON"),
-            config_parse_options: Default::default(),
             maybe_vendor_override: None,
           },
         )
@@ -1569,11 +1570,11 @@ impl ConfigData {
     let resolver = member_dir
       .workspace
       .create_resolver(
+        &CliSys::default(),
         CreateResolverOptions {
           pkg_json_dep_resolution,
           specified_import_map,
         },
-        |path| Ok(std::fs::read_to_string(path)?),
       )
       .inspect_err(|err| {
         lsp_warn!(
@@ -1615,9 +1616,7 @@ impl ConfigData {
       || unstable.contains("sloppy-imports");
     let sloppy_imports_resolver = unstable_sloppy_imports.then(|| {
       Arc::new(CliSloppyImportsResolver::new(
-        SloppyImportsCachedFs::new_without_stat_cache(
-          FsSysTraitsAdapter::new_real(),
-        ),
+        SloppyImportsCachedFs::new_without_stat_cache(CliSys::default()),
       ))
     });
     let resolver = Arc::new(resolver);
@@ -1921,17 +1920,20 @@ impl ConfigTree {
 
   #[cfg(test)]
   pub async fn inject_config_file(&mut self, config_file: ConfigFile) {
+    use sys_traits::FsCreateDirAll;
+    use sys_traits::FsWrite;
+
     let scope = config_file.specifier.join(".").unwrap();
     let json_text = serde_json::to_string(&config_file.json).unwrap();
-    let test_fs = Arc::new(deno_runtime::deno_fs::InMemoryFs::default());
+    let memory_sys = sys_traits::impls::InMemorySys::default();
     let config_path = url_to_file_path(&config_file.specifier).unwrap();
-    test_fs.setup_text_files(vec![(
-      config_path.to_string_lossy().to_string(),
-      json_text,
-    )]);
+    memory_sys
+      .fs_create_dir_all(config_path.parent().unwrap())
+      .unwrap();
+    memory_sys.fs_write(&config_path, json_text).unwrap();
     let workspace_dir = Arc::new(
       WorkspaceDirectory::discover(
-        &FsSysTraitsAdapter(test_fs.clone()),
+        &memory_sys,
         deno_config::workspace::WorkspaceDiscoverStart::ConfigFile(
           &config_path,
         ),
@@ -2008,11 +2010,14 @@ fn resolve_lockfile_from_path(
   lockfile_path: PathBuf,
   frozen: bool,
 ) -> Option<CliLockfile> {
-  match CliLockfile::read_from_path(CliLockfileReadFromPathOptions {
-    file_path: lockfile_path,
-    frozen,
-    skip_write: false,
-  }) {
+  match CliLockfile::read_from_path(
+    &CliSys::default(),
+    CliLockfileReadFromPathOptions {
+      file_path: lockfile_path,
+      frozen,
+      skip_write: false,
+    },
+  ) {
     Ok(value) => {
       if value.filename.exists() {
         if let Ok(specifier) = ModuleSpecifier::from_file_path(&value.filename)
@@ -2071,7 +2076,6 @@ impl deno_config::workspace::WorkspaceCache for WorkspaceMemCache {
 
 #[cfg(test)]
 mod tests {
-  use deno_config::deno_json::ConfigParseOptions;
   use deno_core::resolve_url;
   use deno_core::serde_json;
   use deno_core::serde_json::json;
@@ -2345,12 +2349,7 @@ mod tests {
     config
       .tree
       .inject_config_file(
-        ConfigFile::new(
-          "{}",
-          root_uri.join("deno.json").unwrap(),
-          &ConfigParseOptions::default(),
-        )
-        .unwrap(),
+        ConfigFile::new("{}", root_uri.join("deno.json").unwrap()).unwrap(),
       )
       .await;
     assert!(config.specifier_enabled(&root_uri));
@@ -2406,7 +2405,6 @@ mod tests {
           })
           .to_string(),
           root_uri.join("deno.json").unwrap(),
-          &ConfigParseOptions::default(),
         )
         .unwrap(),
       )
@@ -2432,7 +2430,6 @@ mod tests {
           })
           .to_string(),
           root_uri.join("deno.json").unwrap(),
-          &ConfigParseOptions::default(),
         )
         .unwrap(),
       )
@@ -2450,7 +2447,6 @@ mod tests {
           })
           .to_string(),
           root_uri.join("deno.json").unwrap(),
-          &ConfigParseOptions::default(),
         )
         .unwrap(),
       )

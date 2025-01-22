@@ -1,4 +1,4 @@
-// Copyright 2018-2024 the Deno authors. All rights reserved. MIT license.
+// Copyright 2018-2025 the Deno authors. MIT license.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -24,7 +24,6 @@ use deno_core::url::Url;
 use deno_core::ModuleSpecifier;
 use deno_error::JsError;
 use deno_graph::source::LoaderChecksum;
-use deno_runtime::deno_fs::FsSysTraitsAdapter;
 use deno_runtime::deno_permissions::CheckSpecifierKind;
 use deno_runtime::deno_permissions::PermissionCheckError;
 use deno_runtime::deno_permissions::PermissionsContainer;
@@ -38,6 +37,7 @@ use crate::cache::HttpCache;
 use crate::colors;
 use crate::http_util::get_response_body_with_progress;
 use crate::http_util::HttpClientProvider;
+use crate::sys::CliSys;
 use crate::util::progress_bar::ProgressBar;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -60,11 +60,10 @@ impl TextDecodedFile {
         file.maybe_headers.as_ref(),
       );
     let specifier = file.url;
-    match deno_graph::source::decode_source(
-      &specifier,
-      file.source,
-      maybe_charset,
-    ) {
+    let charset = maybe_charset.unwrap_or_else(|| {
+      deno_media_type::encoding::detect_charset(&specifier, &file.source)
+    });
+    match deno_media_type::encoding::decode_arc_source(charset, file.source) {
       Ok(source) => Ok(TextDecodedFile {
         media_type,
         specifier,
@@ -267,7 +266,7 @@ pub struct FetchNoFollowOptions<'a> {
 
 type DenoCacheDirFileFetcher = deno_cache_dir::file_fetcher::FileFetcher<
   BlobStoreAdapter,
-  FsSysTraitsAdapter,
+  CliSys,
   HttpClientAdapter,
 >;
 
@@ -279,9 +278,11 @@ pub struct CliFileFetcher {
 }
 
 impl CliFileFetcher {
+  #[allow(clippy::too_many_arguments)]
   pub fn new(
     http_cache: Arc<dyn HttpCache>,
     http_client_provider: Arc<HttpClientProvider>,
+    sys: CliSys,
     blob_store: Arc<BlobStore>,
     progress_bar: Option<ProgressBar>,
     allow_remote: bool,
@@ -289,7 +290,6 @@ impl CliFileFetcher {
     download_log_level: log::Level,
   ) -> Self {
     let memory_files = Arc::new(MemoryFiles::default());
-    let sys = FsSysTraitsAdapter::new_real();
     let auth_tokens = AuthTokens::new_from_sys(&sys);
     let file_fetcher = DenoCacheDirFileFetcher::new(
       BlobStoreAdapter(blob_store),
@@ -497,16 +497,16 @@ fn validate_scheme(specifier: &Url) -> Result<(), UnsupportedSchemeError> {
 
 #[cfg(test)]
 mod tests {
-  use crate::cache::GlobalHttpCache;
-  use crate::http_util::HttpClientProvider;
-
-  use super::*;
   use deno_cache_dir::file_fetcher::FetchNoFollowErrorKind;
   use deno_cache_dir::file_fetcher::HttpClient;
   use deno_core::resolve_url;
   use deno_runtime::deno_web::Blob;
   use deno_runtime::deno_web::InMemoryBlobPart;
   use test_util::TempDir;
+
+  use super::*;
+  use crate::cache::GlobalHttpCache;
+  use crate::http_util::HttpClientProvider;
 
   fn setup(
     cache_setting: CacheSetting,
@@ -538,13 +538,11 @@ mod tests {
     let temp_dir = maybe_temp_dir.unwrap_or_default();
     let location = temp_dir.path().join("remote").to_path_buf();
     let blob_store: Arc<BlobStore> = Default::default();
-    let cache = Arc::new(GlobalHttpCache::new(
-      FsSysTraitsAdapter::new_real(),
-      location,
-    ));
+    let cache = Arc::new(GlobalHttpCache::new(CliSys::default(), location));
     let file_fetcher = CliFileFetcher::new(
       cache.clone(),
       Arc::new(HttpClientProvider::new(None, None)),
+      CliSys::default(),
       blob_store.clone(),
       None,
       true,
@@ -754,11 +752,9 @@ mod tests {
     // invocation and indicates to "cache bust".
     let location = temp_dir.path().join("remote").to_path_buf();
     let file_fetcher = CliFileFetcher::new(
-      Arc::new(GlobalHttpCache::new(
-        FsSysTraitsAdapter::new_real(),
-        location,
-      )),
+      Arc::new(GlobalHttpCache::new(CliSys::default(), location)),
       Arc::new(HttpClientProvider::new(None, None)),
+      CliSys::default(),
       Default::default(),
       None,
       true,
@@ -783,14 +779,13 @@ mod tests {
     let specifier =
       resolve_url("http://localhost:4545/subdir/mismatch_ext.ts").unwrap();
 
-    let http_cache = Arc::new(GlobalHttpCache::new(
-      FsSysTraitsAdapter::new_real(),
-      location.clone(),
-    ));
+    let http_cache =
+      Arc::new(GlobalHttpCache::new(CliSys::default(), location.clone()));
     let file_modified_01 = {
       let file_fetcher = CliFileFetcher::new(
         http_cache.clone(),
         Arc::new(HttpClientProvider::new(None, None)),
+        CliSys::default(),
         Default::default(),
         None,
         true,
@@ -810,11 +805,9 @@ mod tests {
 
     let file_modified_02 = {
       let file_fetcher = CliFileFetcher::new(
-        Arc::new(GlobalHttpCache::new(
-          FsSysTraitsAdapter::new_real(),
-          location,
-        )),
+        Arc::new(GlobalHttpCache::new(CliSys::default(), location)),
         Arc::new(HttpClientProvider::new(None, None)),
+        CliSys::default(),
         Default::default(),
         None,
         true,
@@ -940,15 +933,14 @@ mod tests {
       resolve_url("http://localhost:4548/subdir/mismatch_ext.ts").unwrap();
     let redirected_specifier =
       resolve_url("http://localhost:4546/subdir/mismatch_ext.ts").unwrap();
-    let http_cache = Arc::new(GlobalHttpCache::new(
-      FsSysTraitsAdapter::new_real(),
-      location.clone(),
-    ));
+    let http_cache =
+      Arc::new(GlobalHttpCache::new(CliSys::default(), location.clone()));
 
     let metadata_file_modified_01 = {
       let file_fetcher = CliFileFetcher::new(
         http_cache.clone(),
         Arc::new(HttpClientProvider::new(None, None)),
+        CliSys::default(),
         Default::default(),
         None,
         true,
@@ -971,6 +963,7 @@ mod tests {
       let file_fetcher = CliFileFetcher::new(
         http_cache.clone(),
         Arc::new(HttpClientProvider::new(None, None)),
+        CliSys::default(),
         Default::default(),
         None,
         true,
@@ -1075,11 +1068,9 @@ mod tests {
     let temp_dir = TempDir::new();
     let location = temp_dir.path().join("remote").to_path_buf();
     let file_fetcher = CliFileFetcher::new(
-      Arc::new(GlobalHttpCache::new(
-        FsSysTraitsAdapter::new_real(),
-        location,
-      )),
+      Arc::new(GlobalHttpCache::new(CliSys::default(), location)),
       Arc::new(HttpClientProvider::new(None, None)),
+      CliSys::default(),
       Default::default(),
       None,
       false,
@@ -1113,11 +1104,9 @@ mod tests {
     let temp_dir = TempDir::new();
     let location = temp_dir.path().join("remote").to_path_buf();
     let file_fetcher_01 = CliFileFetcher::new(
-      Arc::new(GlobalHttpCache::new(
-        FsSysTraitsAdapter::new_real(),
-        location.clone(),
-      )),
+      Arc::new(GlobalHttpCache::new(CliSys::default(), location.clone())),
       Arc::new(HttpClientProvider::new(None, None)),
+      CliSys::default(),
       Default::default(),
       None,
       true,
@@ -1125,11 +1114,9 @@ mod tests {
       log::Level::Info,
     );
     let file_fetcher_02 = CliFileFetcher::new(
-      Arc::new(GlobalHttpCache::new(
-        FsSysTraitsAdapter::new_real(),
-        location,
-      )),
+      Arc::new(GlobalHttpCache::new(CliSys::default(), location)),
       Arc::new(HttpClientProvider::new(None, None)),
+      CliSys::default(),
       Default::default(),
       None,
       true,
