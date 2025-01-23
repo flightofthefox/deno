@@ -716,15 +716,13 @@ pub fn init(
     DenoIdGenerator::random()
   };
 
-  OTEL_GLOBALS
-    .set(OtelGlobals {
-      log_processor,
-      span_processor,
-      id_generator,
-      meter_provider,
-      builtin_instrumentation_scope,
-    })
-    .map_err(|_| deno_core::anyhow::anyhow!("failed to set otel globals"))?;
+  let _ = OTEL_GLOBALS.set(OtelGlobals {
+    log_processor,
+    span_processor,
+    id_generator,
+    meter_provider,
+    builtin_instrumentation_scope,
+  });
 
   Ok(())
 }
