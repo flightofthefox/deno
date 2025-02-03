@@ -140,7 +140,7 @@ impl DatabaseSync {
     // SAFETY: `sql` points to a valid memory location and its length
     // is correct.
     let r = unsafe {
-      libsqlite3_sys::sqlite3_prepare_v2(
+      libsql_ffi::sqlite3_prepare_v2(
         raw_handle,
         sql.as_ptr() as *const _,
         sql.len() as i32,
@@ -149,7 +149,7 @@ impl DatabaseSync {
       )
     };
 
-    if r != libsqlite3_sys::SQLITE_OK {
+    if r != libsql_ffi::SQLITE_OK {
       return Err(SqliteError::PrepareFailed);
     }
 
